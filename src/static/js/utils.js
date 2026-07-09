@@ -1,11 +1,10 @@
 // ═══════════════════════════════════════════
-// utils.js — 工具函数
+// utils.js — 工具函数（挂载到 window.codex.utils）
 // ═══════════════════════════════════════════
 
-const Utils = {
-    /**
-     * 格式化文件大小
-     */
+window.codex = window.codex || {};
+
+window.codex.utils = {
     formatSize(bytes) {
         if (bytes === 0) return '0 B';
         const k = 1024;
@@ -14,9 +13,6 @@ const Utils = {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     },
 
-    /**
-     * 获取文件扩展名对应的图标类名
-     */
     getFileIcon(name, isDir) {
         if (isDir) return 'icon-folder';
         const ext = name.split('.').pop()?.toLowerCase() || '';
@@ -33,9 +29,6 @@ const Utils = {
         return map[ext] || 'icon-file';
     },
 
-    /**
-     * 获取文件图标 SVG
-     */
     getFileIconSvg(name, isDir) {
         if (isDir) {
             return `<svg class="tree-icon icon-folder" viewBox="0 0 20 20" fill="currentColor">
@@ -47,9 +40,6 @@ const Utils = {
         </svg>`;
     },
 
-    /**
-     * 防抖函数
-     */
     debounce(fn, delay = 300) {
         let timer;
         return function (...args) {
@@ -58,9 +48,6 @@ const Utils = {
         };
     },
 
-    /**
-     * 简单的 DOM 查询
-     */
     $(selector) {
         return document.querySelector(selector);
     },
@@ -69,9 +56,6 @@ const Utils = {
         return document.querySelectorAll(selector);
     },
 
-    /**
-     * 创建 DOM 元素
-     */
     createElement(tag, attrs = {}, children = []) {
         const el = document.createElement(tag);
         Object.entries(attrs).forEach(([key, val]) => {
@@ -88,3 +72,6 @@ const Utils = {
         return el;
     },
 };
+
+// 便捷别名
+const Utils = window.codex.utils;

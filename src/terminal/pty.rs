@@ -1,13 +1,16 @@
-use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{ChildKiller, CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 use tokio::task;
 
 pub struct PtySession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    pub output_broadcast: Arc<Mutex<Vec<mpsc::Sender<String>>>>,
+    /// Broadcast channel: PTY output → all WS listeners
+    pub output_tx: broadcast::Sender<String>,
+    master: Option<Box<dyn MasterPty + Send>>,
     _reader_handle: task::JoinHandle<()>,
+    child_killer: Option<Box<dyn ChildKiller + Send>>,
 }
 
 impl PtySession {
@@ -22,57 +25,50 @@ impl PtySession {
             })
             .unwrap();
 
-        // 根据平台选择 shell
         let mut cmd = if cfg!(target_os = "windows") {
-            if shell == "powershell" || shell.is_empty() {
-                CommandBuilder::new("powershell.exe")
-            } else if shell == "cmd" {
-                CommandBuilder::new("cmd.exe")
-            } else {
-                CommandBuilder::new(shell)
+            match shell {
+                "powershell" | "" => CommandBuilder::new("powershell.exe"),
+                "cmd" => CommandBuilder::new("cmd.exe"),
+                other => CommandBuilder::new(other),
             }
+        } else if shell.is_empty() {
+            CommandBuilder::new("bash")
         } else {
-            if shell.is_empty() {
-                CommandBuilder::new("bash")
-            } else {
-                CommandBuilder::new(shell)
-            }
+            CommandBuilder::new(shell)
         };
 
         cmd.cwd(work_dir);
 
         let child = pair.slave.spawn_command(cmd).unwrap();
-        let mut reader = pair.master.try_clone_reader().unwrap();
+        let reader = pair.master.try_clone_reader().unwrap();
         let writer = pair.master.take_writer().unwrap();
+        let killer = child.try_into_killer().ok();
+        let master: Option<Box<dyn MasterPty + Send>> = Some(pair.master);
 
         let writer = Arc::new(Mutex::new(writer));
-        let output_broadcast = Arc::new(Mutex::new(Vec::<mpsc::Sender<String>>::new()));
-        let broadcast_clone = output_broadcast.clone();
+        let (output_tx, _) = broadcast::channel(256);
 
+        let reader_tx = output_tx.clone();
         let reader_handle = task::spawn_blocking(move || {
             let mut buf = [0u8; 8192];
             loop {
-                match reader.read(&mut buf) {
+                match (&reader as &dyn Read).read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
                         let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                        let senders = broadcast_clone.lock().unwrap();
-                        for sender in senders.iter() {
-                            let _ = sender.try_send(data.clone());
-                        }
+                        let _ = reader_tx.send(data);
                     }
                     Err(_) => break,
                 }
             }
         });
 
-        // 保存 child 进程句柄（用于清理）
-        let _child = child;
-
         Self {
             writer,
-            output_broadcast,
+            output_tx,
+            master,
             _reader_handle: reader_handle,
+            child_killer: killer,
         }
     }
 
@@ -83,16 +79,25 @@ impl PtySession {
         }
     }
 
-    pub fn resize(&self, cols: u16, rows: u16) {
-        // resize 操作需要通过 master handle 执行
-        // portable-pty 的 resize 在不同平台处理方式不同
-        // 这里简化处理
+    pub fn resize(&self, cols: u16, rows: u16) -> Result<(), String> {
+        if let Some(master) = &self.master {
+            master
+                .resize(PtySize {
+                    rows,
+                    cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+                .map_err(|e| e.to_string())
+        } else {
+            Err("master handle not available".into())
+        }
     }
 
     pub fn kill(&mut self) {
-        // 清理所有发送者以关闭接收端
-        if let Ok(mut senders) = self.output_broadcast.lock() {
-            senders.clear();
+        self.master = None;
+        if let Some(killer) = self.child_killer.take() {
+            let _ = killer.kill();
         }
     }
 }

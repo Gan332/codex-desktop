@@ -3,19 +3,19 @@ use axum::{
     extract::{
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Path, Query,
+        Query,
     },
     response::{Html, Json, IntoResponse},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::RwLock;
+use std::sync::Arc;
+use tokio::sync::{broadcast, mpsc, RwLock};
 use tower_http::cors::CorsLayer;
 
 use crate::config;
 use crate::files;
-use crate::terminal::{self, SessionManager};
+use crate::terminal;
 
 // ── 内嵌前端资源 ──────────────────────────────────────────────
 const INDEX_HTML: &str = include_str!("static/index.html");
@@ -27,33 +27,31 @@ const JS_SETTINGS: &str = include_str!("static/js/settings.js");
 const JS_WEBSOCKET: &str = include_str!("static/js/websocket.js");
 const JS_LAYOUT: &str = include_str!("static/js/layout.js");
 const JS_UTILS: &str = include_str!("static/js/utils.js");
+const VENDOR_XTERM_CSS: &str = include_str!("static/vendor/xterm.min.css");
+const VENDOR_XTERM_JS: &str = include_str!("static/vendor/xterm.min.js");
+const VENDOR_FIT_JS: &str = include_str!("static/vendor/addon-fit.min.js");
+const VENDOR_WEBLINKS_JS: &str = include_str!("static/vendor/addon-web-links.min.js");
+const VENDOR_TAILWIND_JS: &str = include_str!("static/vendor/tailwind.min.js");
 
 // ── 应用状态 ──────────────────────────────────────────────────
 pub struct AppState {
-    pub sessions: RwLock<SessionManager>,
+    pub sessions: RwLock<terminal::SessionManager>,
     pub config: RwLock<config::AppConfig>,
 }
 
 pub fn build_router() -> Router {
     let state = Arc::new(AppState {
-        sessions: RwLock::new(SessionManager::new()),
+        sessions: RwLock::new(terminal::SessionManager::new()),
         config: RwLock::new(config::load()),
     });
 
     Router::new()
-        // 前端静态资源
         .route("/", get(index_page))
         .route("/css/app.css", get(css_page))
-        .route("/js/app.js", get(|_| async { js_response(JS_APP) }))
-        .route("/js/terminal.js", get(|_| async { js_response(JS_TERMINAL) }))
-        .route("/js/filetree.js", get(|_| async { js_response(JS_FILETREE) }))
-        .route("/js/settings.js", get(|_| async { js_response(JS_SETTINGS) }))
-        .route("/js/websocket.js", get(|_| async { js_response(JS_WEBSOCKET) }))
-        .route("/js/layout.js", get(|_| async { js_response(JS_LAYOUT) }))
-        .route("/js/utils.js", get(|_| async { js_response(JS_UTILS) }))
-        // WebSocket 终端
+        .route("/js/{*path}", get(js_handler))
+        // Vendor static files (served from filesystem for size)
+        .route("/vendor/{*path}", get(vendor_handler))
         .route("/ws/terminal", get(ws_terminal_handler))
-        // REST API
         .route("/api/config", get(get_config).post(save_config))
         .route("/api/files/list", get(list_directory))
         .route("/api/files/read", get(read_file))
@@ -66,14 +64,6 @@ pub fn build_router() -> Router {
 
 // ── 静态资源处理器 ────────────────────────────────────────────
 
-fn js_response(js: &str) -> axum::response::Response {
-    (
-        [("content-type", "application/javascript; charset=utf-8")],
-        js.to_string(),
-    )
-        .into_response()
-}
-
 async fn index_page() -> Html<&'static str> {
     Html(INDEX_HTML)
 }
@@ -83,6 +73,50 @@ async fn css_page() -> impl IntoResponse {
         [("content-type", "text/css; charset=utf-8")],
         APP_CSS.to_string(),
     )
+}
+
+async fn js_handler(axum::extract::Path(path): axum::extract::Path<String>) -> impl IntoResponse {
+    let content: &str = match path.as_str() {
+        "app.js" => JS_APP,
+        "terminal.js" => JS_TERMINAL,
+        "filetree.js" => JS_FILETREE,
+        "settings.js" => JS_SETTINGS,
+        "websocket.js" => JS_WEBSOCKET,
+        "layout.js" => JS_LAYOUT,
+        "utils.js" => JS_UTILS,
+        _ => return (
+            [("content-type", "text/plain")],
+            "Not Found".to_string(),
+        ).into_response(),
+    };
+    (
+        [("content-type", "application/javascript; charset=utf-8")],
+        content.to_string(),
+    ).into_response()
+}
+
+async fn vendor_handler(axum::extract::Path(path): axum::extract::Path<String>) -> impl IntoResponse {
+    let (content, content_type): (&str, &str) = match path.as_str() {
+        "xterm.min.css" => (VENDOR_XTERM_CSS, "text/css"),
+        "xterm.min.js" => (VENDOR_XTERM_JS, "application/javascript"),
+        "addon-fit.min.js" => (VENDOR_FIT_JS, "application/javascript"),
+        "addon-web-links.min.js" => (VENDOR_WEBLINKS_JS, "application/javascript"),
+        "tailwind.min.js" => (VENDOR_TAILWIND_JS, "application/javascript"),
+        _ => return (
+            [("content-type", "text/plain")],
+            "Not Found".to_string(),
+        ).into_response(),
+    };
+    (
+        [("content-type", format!("{}; charset=utf-8", content_type))],
+        content.to_string(),
+    ).into_response()
+}
+
+// ── 内部消息：WS 发送任务从不同来源收消息 ────────────────────
+enum WsSendMsg {
+    Output { session_id: String, data: String },
+    SessionCreated { session_id: String },
 }
 
 // ── WebSocket 终端 ────────────────────────────────────────────
@@ -97,44 +131,25 @@ async fn ws_terminal_handler(
 async fn handle_terminal_ws(socket: WebSocket, state: Arc<AppState>) {
     let (mut sender, mut receiver) = socket.split();
 
-    // 创建新的终端会话
-    let session_id = {
-        let mut sessions = state.sessions.write().await;
-        let cfg = state.config.read().await;
-        sessions.create_session(&cfg.shell, &cfg.work_dir)
-    };
+    // 内部 channel：所有 session 的输出 + 事件 → WS 发送任务
+    let (shared_tx, mut shared_rx) = mpsc::unbounded_channel::<WsSendMsg>();
 
-    // 通知前端会话 ID
-    let _ = sender
-        .send(Message::Text(
-            serde_json::to_string(&terminal::WsMessage::SessionCreated {
-                session_id: session_id.clone(),
-            })
-            .unwrap()
-            .into(),
-        ))
-        .await;
+    // 不在此处初始创建会话 —— 由前端发起的 terminal_create 消息驱动
 
-    // 获取输出接收器
-    let mut output_rx = {
-        let sessions = state.sessions.read().await;
-        sessions.get_output_rx(&session_id)
-    };
-
-    // 双向消息转发
-    let state_clone = state.clone();
-    let sid = session_id.clone();
-
-    // 读取任务：PTY 输出 → WebSocket
-    let mut send_task = tokio::spawn(async move {
-        while let Some(Ok(data)) = output_rx.recv().await {
-            let msg = terminal::WsMessage::TerminalOutput {
-                session_id: sid.clone(),
-                data,
+    // 发送任务：内部消息 → WS
+    let send_task = tokio::spawn(async move {
+        while let Some(internal) = shared_rx.recv().await {
+            let ws_msg: terminal::WsMessage = match internal {
+                WsSendMsg::Output { session_id, data } => {
+                    terminal::WsMessage::TerminalOutput { session_id, data }
+                }
+                WsSendMsg::SessionCreated { session_id } => {
+                    terminal::WsMessage::SessionCreated { session_id }
+                }
             };
             if sender
                 .send(Message::Text(
-                    serde_json::to_string(&msg).unwrap().into(),
+                    serde_json::to_string(&ws_msg).unwrap().into(),
                 ))
                 .await
                 .is_err()
@@ -144,35 +159,15 @@ async fn handle_terminal_ws(socket: WebSocket, state: Arc<AppState>) {
         }
     });
 
-    // 写入任务：WebSocket 输入 → PTY
-    let mut recv_task = tokio::spawn(async move {
+    // 接收任务：WS → dispatch
+    let state2 = state.clone();
+    let tx_for_recv = shared_tx.clone();
+    let recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.recv().await {
             match msg {
                 Message::Text(text) => {
                     if let Ok(ws_msg) = serde_json::from_str::<terminal::WsMessage>(&text) {
-                        match ws_msg {
-                            terminal::WsMessage::TerminalInput {
-                                session_id,
-                                data,
-                            } => {
-                                let sessions = state_clone.sessions.read().await;
-                                sessions.write_input(&session_id, &data);
-                            }
-                            terminal::WsMessage::TerminalResize {
-                                session_id,
-                                cols,
-                                rows,
-                            } => {
-                                let sessions = state_clone.sessions.read().await;
-                                sessions.resize(&session_id, cols, rows);
-                            }
-                            terminal::WsMessage::TerminalKill { session_id } => {
-                                let mut sessions = state_clone.sessions.write().await;
-                                sessions.kill_session(&session_id);
-                                break;
-                            }
-                            _ => {}
-                        }
+                        handle_ws_message(ws_msg, &state2, &tx_for_recv).await;
                     }
                 }
                 Message::Close(_) => break,
@@ -181,15 +176,83 @@ async fn handle_terminal_ws(socket: WebSocket, state: Arc<AppState>) {
         }
     });
 
-    // 任一任务结束则清理
+    // 任一任务结束则全部清理
     tokio::select! {
-        _ = &mut send_task => recv_task.abort(),
-        _ = &mut recv_task => send_task.abort(),
+        _ = send_task => recv_task.abort(),
+        _ = recv_task => send_task.abort(),
     }
+}
 
-    // 清理会话
-    let mut sessions = state.sessions.write().await;
-    sessions.kill_session(&session_id);
+/// 将 broadcast::Receiver 的输出转发到内部 channel
+async fn forward_output(
+    session_id: String,
+    mut rx: broadcast::Receiver<String>,
+    tx: mpsc::UnboundedSender<WsSendMsg>,
+) {
+    loop {
+        match rx.recv().await {
+            Ok(data) => {
+                if tx
+                    .send(WsSendMsg::Output {
+                        session_id: session_id.clone(),
+                        data,
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            Err(broadcast::error::RecvError::Closed) => break,
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+        }
+    }
+}
+
+async fn handle_ws_message(
+    msg: terminal::WsMessage,
+    state: &Arc<AppState>,
+    shared_tx: &mpsc::UnboundedSender<WsSendMsg>,
+) {
+    match msg {
+        terminal::WsMessage::TerminalInput {
+            session_id,
+            data,
+        } => {
+            let sessions = state.sessions.read().await;
+            sessions.write_input(&session_id, &data);
+        }
+        terminal::WsMessage::TerminalResize {
+            session_id,
+            cols,
+            rows,
+        } => {
+            let sessions = state.sessions.read().await;
+            sessions.resize(&session_id, cols, rows);
+        }
+        terminal::WsMessage::TerminalCreate { .. } => {
+            let sid = {
+                let cfg = state.config.read().await;
+                let mut mgr = state.sessions.write().await;
+                mgr.create_session(&cfg.shell, &cfg.work_dir)
+            };
+            // Notify frontend about the new session
+            let _ = shared_tx.send(WsSendMsg::SessionCreated {
+                session_id: sid.clone(),
+            });
+            // Start forwarding output
+            if let Some(rx) = state.sessions.read().await.get_output_rx(&sid) {
+                let tx = shared_tx.clone();
+                tokio::spawn(async move {
+                    forward_output(sid, rx, tx).await;
+                });
+            }
+        }
+        terminal::WsMessage::TerminalKill { session_id } => {
+            let mut sessions = state.sessions.write().await;
+            sessions.kill_session(&session_id);
+        }
+        _ => {}
+    }
 }
 
 // ── REST API 处理器 ────────────────────────────────────────────
@@ -207,7 +270,7 @@ async fn health_check() -> Json<HealthResponse> {
     })
 }
 
-async fn get_config(State(state): State<Arc<AppConfig>>) -> Json<config::AppConfig> {
+async fn get_config(State(state): State<Arc<AppState>>) -> Json<config::AppConfig> {
     let cfg = state.config.read().await;
     Json(cfg.clone())
 }
@@ -251,7 +314,7 @@ async fn list_directory(Query(query): Query<ListQuery>) -> impl IntoResponse {
     });
     match files::list_dir(&path) {
         Ok(entries) => Json(serde_json::to_value(entries).unwrap()),
-        Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "error": e })),
     }
 }
 
@@ -263,7 +326,7 @@ struct ReadQuery {
 async fn read_file(Query(query): Query<ReadQuery>) -> impl IntoResponse {
     match files::read_file(&query.path) {
         Ok(content) => Json(serde_json::json!({ "content": content })),
-        Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "error": e })),
     }
 }
 
@@ -282,7 +345,7 @@ async fn search_files(Query(query): Query<SearchQuery>) -> impl IntoResponse {
     });
     match files::search(&base, &query.keyword) {
         Ok(results) => Json(serde_json::to_value(results).unwrap()),
-        Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "error": e })),
     }
 }
 

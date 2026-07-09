@@ -2,82 +2,74 @@
 // terminal.js — 终端管理模块
 // ═══════════════════════════════════════════
 
+window.codex = window.codex || {};
+
 class TerminalManager {
     constructor() {
-        this.sessions = new Map();  // sessionId -> { term, fitAddon, tabEl }
+        this.sessions = new Map();
         this.activeSessionId = null;
-        this.tabContainer = Utils.$('#terminal-tabs');
-        this.wrapperEl = Utils.$('#terminal-wrapper');
+        this._initialized = false;
     }
 
-    /**
-     * 初始化：创建第一个终端会话
-     */
     init() {
-        // 监听后端会话创建响应
-        wsManager.on('session_created', (msg) => {
+        if (this._initialized) return;
+        this._initialized = true;
+
+        const ws = window.codex.ws;
+        const $ = window.codex.utils.$;
+
+        this.tabContainer = $('#terminal-tabs');
+        this.wrapperEl = $('#terminal-wrapper');
+
+        ws.on('session_created', (msg) => {
             console.log('[Terminal] 会话已创建:', msg.session_id);
             this.setupTerminal(msg.session_id);
             this.updateStatusPTY(msg.session_id, '运行中');
         });
 
-        // 监听终端输出
-        wsManager.on('terminal_output', (msg) => {
+        ws.on('terminal_output', (msg) => {
             const session = this.sessions.get(msg.session_id);
             if (session) {
                 session.term.write(msg.data);
             }
         });
 
-        // 监听错误
-        wsManager.on('error', (msg) => {
+        ws.on('error', (msg) => {
             console.error('[Terminal] 错误:', msg.message);
         });
 
-        // 监听连接/断开
-        wsManager.on('connected', () => {
+        ws.on('connected', () => {
             this.createSession();
         });
 
-        // 窗口 resize 时更新终端
-        window.addEventListener('resize', Utils.debounce(() => {
+        window.addEventListener('resize', window.codex.utils.debounce(() => {
             this.fitActive();
         }, 150));
 
-        // 创建新终端按钮
-        Utils.$('#btn-new-tab')?.addEventListener('click', () => {
+        $('#btn-new-tab')?.addEventListener('click', () => {
             this.createSession();
         });
 
-        // 如果已连接，立即创建终端
-        if (wsManager.isConnected) {
+        if (ws.isConnected) {
             this.createSession();
         }
     }
 
-    /**
-     * 通过 WebSocket 创建新终端会话
-     */
     createSession() {
         const id = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-        wsManager.send({ type: 'terminal_create', session_id: id });
+        window.codex.ws.send({ type: 'terminal_create', session_id: id });
     }
 
-    /**
-     * 初始化 xterm 实例
-     */
     setupTerminal(sessionId) {
-        // 检查是否已存在
         if (this.sessions.has(sessionId)) return;
 
-        // 创建终端容器
-        const containerEl = Utils.createElement('div', {
+        const $ = window.codex.utils.$;
+        const containerEl = window.codex.utils.createElement('div', {
             className: 'absolute inset-0 hidden',
             id: `term-${sessionId}`,
         });
         this.wrapperEl.appendChild(containerEl);
 
-        // 创建 xterm 实例
         const term = new Terminal({
             cursorBlink: true,
             cursorStyle: 'bar',
@@ -96,63 +88,51 @@ class TerminalManager {
 
         term.open(containerEl);
 
-        // 延迟 fit 以确保容器尺寸正确
         requestAnimationFrame(() => {
             fitAddon.fit();
             this.sendResize(sessionId, term.cols, term.rows);
         });
 
-        // 用户输入 → WebSocket
         term.onData((data) => {
-            wsManager.send({
+            window.codex.ws.send({
                 type: 'terminal_input',
                 session_id: sessionId,
                 data: data,
             });
         });
 
-        // 终端尺寸变化 → WebSocket
         term.onResize(({ cols, rows }) => {
             this.sendResize(sessionId, cols, rows);
         });
 
-        // 创建标签页
         const tabEl = this.createTab(sessionId);
 
-        const session = {
-            term,
-            fitAddon,
-            tabEl,
-            containerEl,
-        };
+        const session = { term, fitAddon, tabEl, containerEl };
         this.sessions.set(sessionId, session);
-
-        // 切换到新标签页
         this.switchTo(sessionId);
-
         console.log('[Terminal] 终端已初始化:', sessionId);
     }
 
-    /**
-     * 创建标签页 UI
-     */
     createTab(sessionId) {
-        const tab = Utils.createElement('div', {
+        const $ = window.codex.utils.$;
+        const H = window.codex.utils.createElement;
+
+        const tab = H('div', {
             className: 'terminal-tab group flex items-center gap-1.5 px-2.5 py-1 text-xs rounded cursor-pointer',
         });
 
-        const icon = Utils.createElement('span', {
+        const icon = H('span', {
             innerHTML: `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
             </svg>`,
             className: 'text-gray-400',
         });
 
-        const label = Utils.createElement('span', {
+        const label = H('span', {
             textContent: `终端 ${this.sessions.size + 1}`,
         });
 
-        const closeBtn = Utils.createElement('span', {
+        const closeBtn = H('span', {
             className: 'tab-close',
             innerHTML: `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -166,18 +146,13 @@ class TerminalManager {
         tab.appendChild(icon);
         tab.appendChild(label);
         tab.appendChild(closeBtn);
-
         tab.addEventListener('click', () => this.switchTo(sessionId));
 
-        this.tabContainer.appendChild(tab);
+        $('#terminal-tabs').appendChild(tab);
         return tab;
     }
 
-    /**
-     * 切换到指定会话
-     */
     switchTo(sessionId) {
-        // 隐藏所有终端
         this.sessions.forEach((s, id) => {
             s.containerEl.classList.add('hidden');
             s.tabEl.classList.remove('active');
@@ -190,7 +165,6 @@ class TerminalManager {
         session.tabEl.classList.add('active');
         this.activeSessionId = sessionId;
 
-        // 重新 fit 并聚焦
         requestAnimationFrame(() => {
             session.fitAddon.fit();
             session.term.focus();
@@ -199,11 +173,8 @@ class TerminalManager {
         this.updateStatusPTY(sessionId, '运行中');
     }
 
-    /**
-     * 发送 resize 消息
-     */
     sendResize(sessionId, cols, rows) {
-        wsManager.send({
+        window.codex.ws.send({
             type: 'terminal_resize',
             session_id: sessionId,
             cols,
@@ -211,11 +182,8 @@ class TerminalManager {
         });
     }
 
-    /**
-     * 关闭终端会话
-     */
     killSession(sessionId) {
-        wsManager.send({ type: 'terminal_kill', session_id: sessionId });
+        window.codex.ws.send({ type: 'terminal_kill', session_id: sessionId });
 
         const session = this.sessions.get(sessionId);
         if (session) {
@@ -225,7 +193,6 @@ class TerminalManager {
             this.sessions.delete(sessionId);
         }
 
-        // 切换到另一个会话
         if (this.activeSessionId === sessionId) {
             const remaining = [...this.sessions.keys()];
             if (remaining.length > 0) {
@@ -237,9 +204,6 @@ class TerminalManager {
         }
     }
 
-    /**
-     * 重新适配终端尺寸
-     */
     fitActive() {
         if (this.activeSessionId) {
             const session = this.sessions.get(this.activeSessionId);
@@ -249,19 +213,13 @@ class TerminalManager {
         }
     }
 
-    /**
-     * 更新状态栏 PTY 信息
-     */
     updateStatusPTY(sessionId, status) {
-        const el = Utils.$('#status-pty');
+        const el = window.codex.utils.$('#status-pty');
         if (el) {
             el.textContent = sessionId ? `会话: ${sessionId.slice(0, 12)}... ${status}` : '--';
         }
     }
 
-    /**
-     * 获取终端配色主题
-     */
     getTerminalTheme() {
         const isDark = document.documentElement.classList.contains('dark');
         return {
@@ -290,5 +248,5 @@ class TerminalManager {
     }
 }
 
-// 全局实例
-window.terminalManager = new TerminalManager();
+window.codex.terminal = new TerminalManager();
+const terminalManager = window.codex.terminal;

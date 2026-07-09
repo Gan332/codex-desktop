@@ -2,10 +2,12 @@
 // websocket.js — WebSocket 连接管理
 // ═══════════════════════════════════════════
 
+window.codex = window.codex || {};
+
 class WebSocketManager {
     constructor() {
         this.ws = null;
-        this.listeners = new Map();  // type -> [callback]
+        this.listeners = new Map();
         this.reconnectTimer = null;
         this.reconnectAttempts = 0;
         this.maxReconnectAttempts = 10;
@@ -13,9 +15,6 @@ class WebSocketManager {
         this.isConnected = false;
     }
 
-    /**
-     * 建立 WebSocket 连接
-     */
     connect() {
         if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
             return;
@@ -62,18 +61,12 @@ class WebSocketManager {
         };
     }
 
-    /**
-     * 发送消息
-     */
     send(msg) {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify(msg));
         }
     }
 
-    /**
-     * 注册消息监听器
-     */
     on(type, callback) {
         if (!this.listeners.has(type)) {
             this.listeners.set(type, []);
@@ -86,9 +79,6 @@ class WebSocketManager {
         };
     }
 
-    /**
-     * 触发事件
-     */
     emit(type, data) {
         const cbs = this.listeners.get(type) || [];
         cbs.forEach(cb => {
@@ -96,9 +86,6 @@ class WebSocketManager {
         });
     }
 
-    /**
-     * 断线重连
-     */
     scheduleReconnect() {
         if (this.reconnectAttempts >= this.maxReconnectAttempts) {
             console.log('[WS] 重连次数超限');
@@ -116,11 +103,8 @@ class WebSocketManager {
         }, delay);
     }
 
-    /**
-     * 更新连接状态 UI
-     */
     updateStatusUI(connected) {
-        const el = Utils.$('#status-ws');
+        const el = window.codex.utils.$('#status-ws');
         if (!el) return;
         if (connected) {
             el.innerHTML = '<span class="w-2 h-2 rounded-full bg-green-500"></span>已连接';
@@ -129,20 +113,17 @@ class WebSocketManager {
         }
     }
 
-    /**
-     * 关闭连接
-     */
     disconnect() {
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
             this.reconnectTimer = null;
         }
-        this.maxReconnectAttempts = 0; // 阻止重连
+        this.maxReconnectAttempts = 0;
         if (this.ws) {
             this.ws.close();
         }
     }
 }
 
-// 全局实例
-window.wsManager = new WebSocketManager();
+window.codex.ws = new WebSocketManager();
+const wsManager = window.codex.ws; // 兼容旧引用

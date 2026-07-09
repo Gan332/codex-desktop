@@ -1,9 +1,8 @@
-pub mod handler;
 pub mod pty;
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 
 pub struct SessionManager {
     sessions: HashMap<String, pty::PtySession>,
@@ -23,16 +22,12 @@ impl SessionManager {
         id
     }
 
-    pub fn get_output_rx(&self, session_id: &str) -> mpsc::Receiver<String> {
-        // 创建一个通道用于转发输出
-        let (tx, rx) = mpsc::channel(256);
-        if let Some(session) = self.sessions.get(session_id) {
-            // 将发送端克隆到会话的广播列表
-            // 这里简化处理，实际应使用 broadcast channel
-            let mut senders = session.output_broadcast.lock().unwrap();
-            senders.push(tx);
-        }
-        rx
+    /// Subscribe to a session's output broadcast.
+    /// Returns `None` if the session doesn't exist.
+    pub fn get_output_rx(&self, session_id: &str) -> Option<broadcast::Receiver<String>> {
+        self.sessions
+            .get(session_id)
+            .map(|session| session.output_tx.subscribe())
     }
 
     pub fn write_input(&self, session_id: &str, data: &str) {
@@ -41,9 +36,10 @@ impl SessionManager {
         }
     }
 
-    pub fn resize(&self, session_id: &str, cols: u16, rows: u16) {
-        if let Some(session) = self.sessions.get(session_id) {
-            session.resize(cols, rows);
+    pub fn resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<(), String> {
+        match self.sessions.get(session_id) {
+            Some(session) => session.resize(cols, rows),
+            None => Err("session not found".into()),
         }
     }
 

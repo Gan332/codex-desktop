@@ -2,7 +2,7 @@ pub mod watcher;
 
 use serde::Serialize;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Serialize)]
 pub struct FileEntry {
@@ -31,9 +31,6 @@ pub fn list_dir(path: &str) -> Result<Vec<FileEntry>, String> {
                 let metadata = entry.metadata().unwrap_or_default();
                 let path_buf = entry.path();
                 let name = entry.file_name().to_string_lossy().to_string();
-
-                // 跳过隐藏文件（可选）
-                // if name.starts_with('.') { continue; }
 
                 let ext = path_buf
                     .extension()
@@ -74,7 +71,6 @@ pub fn read_file(path: &str) -> Result<String, String> {
         return Err(format!("不是文件: {}", path));
     }
 
-    // 限制文件大小（最大 1MB）
     let metadata = fs::metadata(file).map_err(|e| e.to_string())?;
     if metadata.len() > 1_048_576 {
         return Err("文件过大（超过 1MB），无法预览".into());
@@ -83,53 +79,73 @@ pub fn read_file(path: &str) -> Result<String, String> {
     fs::read_to_string(file).map_err(|e| e.to_string())
 }
 
-/// 搜索文件（简单的文件名匹配）
+/// 忽略的目录名（大小写不敏感）
+fn is_ignored_dir(name: &str) -> bool {
+    matches!(
+        name.to_lowercase().as_str(),
+        "node_modules"
+            | "target"
+            | ".git"
+            | ".svn"
+            | ".hg"
+            | ".idea"
+            | "vendor"
+            | ".next"
+            | "dist"
+            | "build"
+            | "__pycache__"
+            | ".venv"
+            | "env"
+    )
+}
+
+/// 搜索文件——使用 walkdir，跳过常见忽略目录，结果上限 200 条
 pub fn search(base_path: &str, keyword: &str) -> Result<Vec<FileEntry>, String> {
     let base = Path::new(base_path);
     if !base.exists() {
         return Err(format!("搜索路径不存在: {}", base_path));
     }
 
-    let mut results = Vec::new();
     let keyword_lower = keyword.to_lowercase();
+    let max_results = 200;
+    let mut results = Vec::new();
 
-    fn walk(dir: &Path, keyword: &str, results: &mut Vec<FileEntry>, depth: usize) {
-        if depth > 5 {
-            return; // 限制搜索深度
-        }
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let name = entry.file_name().to_string_lossy().to_string();
+    for entry in walkdir::WalkDir::new(base)
+        .max_depth(8)
+        .into_iter()
+        .filter_entry(|e| {
+            // 跳过忽略目录及其子树
+            if e.depth() > 0 && e.file_type().is_dir() {
+                let name = e.file_name().to_string_lossy();
+                return !is_ignored_dir(&name);
+            }
+            true
+        })
+        .filter_map(|e| e.ok())
+    {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.to_lowercase().contains(&keyword_lower) {
+            let metadata = entry.metadata().unwrap_or_default();
+            let path = entry.path();
+            let ext = path
+                .extension()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
 
-                if name.to_lowercase().contains(keyword) {
-                    let metadata = entry.metadata().unwrap_or_default();
-                    let ext = path
-                        .extension()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string();
+            results.push(FileEntry {
+                name,
+                path: path.to_string_lossy().to_string(),
+                is_dir: metadata.is_dir(),
+                size: metadata.len(),
+                extension: ext,
+            });
 
-                    results.push(FileEntry {
-                        name,
-                        path: path.to_string_lossy().to_string(),
-                        is_dir: metadata.is_dir(),
-                        size: metadata.len(),
-                        extension: ext,
-                    });
-                }
-
-                if path.is_dir() && !name.starts_with('.') && name != "node_modules" && name != "target" {
-                    walk(&path, keyword, results, depth + 1);
-                }
-
-                if results.len() >= 100 {
-                    return;
-                }
+            if results.len() >= max_results {
+                break;
             }
         }
     }
 
-    walk(base, &keyword_lower, &mut results, 0);
     Ok(results)
 }

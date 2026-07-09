@@ -2,32 +2,31 @@
 // filetree.js — 文件树浏览模块
 // ═══════════════════════════════════════════
 
+window.codex = window.codex || {};
+
 class FileTreeManager {
     constructor() {
-        this.treeEl = Utils.$('#file-tree');
-        this.pathEl = Utils.$('#current-path');
-        this.searchEl = Utils.$('#file-search');
         this.currentPath = '';
         this.expandedDirs = new Set();
         this.selectedFile = null;
+        // LRU 目录缓存：path → [FileEntry]
+        this._dirCache = new Map();
+        this._maxCacheSize = 50;
     }
 
-    /**
-     * 初始化
-     */
     async init() {
-        // 搜索防抖
-        this.searchEl?.addEventListener('input', Utils.debounce((e) => {
+        const $ = window.codex.utils.$;
+        this.treeEl = $('#file-tree');
+        this.pathEl = $('#current-path');
+        this.searchEl = $('#file-search');
+
+        this.searchEl?.addEventListener('input', window.codex.utils.debounce((e) => {
             this.handleSearch(e.target.value);
         }, 400));
 
-        // 加载初始目录
         await this.loadConfig();
     }
 
-    /**
-     * 从后端加载配置获取工作目录
-     */
     async loadConfig() {
         try {
             const res = await fetch('/api/config');
@@ -37,31 +36,36 @@ class FileTreeManager {
             await this.loadDirectory(this.currentPath);
         } catch (e) {
             console.error('[FileTree] 加载配置失败:', e);
-            // 使用默认路径
             this.currentPath = '~';
             this.updatePathDisplay();
         }
     }
 
-    /**
-     * 更新路径显示
-     */
     updatePathDisplay() {
         if (this.pathEl) {
             this.pathEl.textContent = this.currentPath;
         }
-        Utils.$('#status-cwd').textContent = this.currentPath;
+        window.codex.utils.$('#status-cwd').textContent = this.currentPath;
     }
 
-    /**
-     * 从后端加载目录
-     */
     async loadDirectory(path) {
         this.treeEl.innerHTML = `<div class="p-2 text-xs text-gray-500">加载中...</div>`;
 
         try {
-            const res = await fetch(`/api/files/list?path=${encodeURIComponent(path)}`);
-            const data = await res.json();
+            let data;
+            if (this._dirCache.has(path)) {
+                data = this._dirCache.get(path);
+            } else {
+                const res = await fetch(`/api/files/list?path=${encodeURIComponent(path)}`);
+                data = await res.json();
+                if (!data.error) {
+                    this._dirCache.set(path, data);
+                    if (this._dirCache.size > this._maxCacheSize) {
+                        const firstKey = this._dirCache.keys().next().value;
+                        this._dirCache.delete(firstKey);
+                    }
+                }
+            }
 
             if (data.error) {
                 this.treeEl.innerHTML = `<div class="p-2 text-xs text-red-400">${data.error}</div>`;
@@ -77,9 +81,6 @@ class FileTreeManager {
         }
     }
 
-    /**
-     * 渲染文件树
-     */
     renderTree(entries) {
         this.treeEl.innerHTML = '';
 
@@ -88,7 +89,6 @@ class FileTreeManager {
             return;
         }
 
-        // "返回上级" 按钮
         if (this.currentPath !== '~' && this.currentPath !== '/') {
             const parentPath = this.getParentPath(this.currentPath);
             const upItem = this.createTreeItem({
@@ -101,52 +101,40 @@ class FileTreeManager {
             this.treeEl.appendChild(upItem);
         }
 
-        // 目录在前，文件在后（后端已排序）
         entries.forEach(entry => {
             const item = this.createTreeItem(entry);
             this.treeEl.appendChild(item);
         });
     }
 
-    /**
-     * 创建单个文件树项
-     */
     createTreeItem(entry, isParent = false) {
-        const item = Utils.createElement('div', {
+        const H = window.codex.utils.createElement;
+        const item = H('div', {
             className: `tree-item ${this.selectedFile === entry.path ? 'selected' : ''}`,
             'data-path': entry.path,
             'data-is-dir': entry.is_dir ? 'true' : 'false',
         });
 
-        // 图标
         const iconHtml = isParent
             ? `<svg class="tree-icon icon-folder" viewBox="0 0 20 20" fill="currentColor">
                 <path fill-rule="evenodd" d="M7.707 3.293a1 1 0 010 1.414L5.414 7H11a7 7 0 017 7v2a1 1 0 11-2 0v-2a5 5 0 00-5-5H5.414l2.293 2.293a1 1 0 11-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd"/>
                </svg>`
-            : Utils.getFileIconSvg(entry.name, entry.is_dir);
+            : window.codex.utils.getFileIconSvg(entry.name, entry.is_dir);
 
-        const icon = Utils.createElement('span', { innerHTML: iconHtml });
-
-        // 名称
-        const name = Utils.createElement('span', {
-            className: 'truncate flex-1',
-            textContent: entry.name,
-        });
-
-        // 大小（仅文件显示）
-        let sizeEl = null;
-        if (!entry.is_dir && entry.size > 0) {
-            sizeEl = Utils.createElement('span', {
-                className: 'text-[10px] text-gray-600 ml-auto shrink-0',
-                textContent: Utils.formatSize(entry.size),
-            });
-        }
+        const icon = H('span', { innerHTML: iconHtml });
+        const name = H('span', { className: 'truncate flex-1', textContent: entry.name });
 
         item.appendChild(icon);
         item.appendChild(name);
-        if (sizeEl) item.appendChild(sizeEl);
 
-        // 点击事件
+        if (!entry.is_dir && entry.size > 0) {
+            const sizeEl = H('span', {
+                className: 'text-[10px] text-gray-600 ml-auto shrink-0',
+                textContent: window.codex.utils.formatSize(entry.size),
+            });
+            item.appendChild(sizeEl);
+        }
+
         item.addEventListener('click', async () => {
             if (entry.is_dir) {
                 await this.toggleDir(entry.path, item);
@@ -158,22 +146,31 @@ class FileTreeManager {
         return item;
     }
 
-    /**
-     * 展开/折叠目录
-     */
     async toggleDir(path, itemEl) {
-        // 检查是否已展开（已有子元素）
         const existingChildren = itemEl.nextElementSibling;
         if (existingChildren && existingChildren.classList.contains('tree-children')) {
             existingChildren.remove();
             this.expandedDirs.delete(path);
+            // invalidate cache when collapsing
+            this._dirCache.delete(path);
             return;
         }
 
-        // 加载目录内容
         try {
-            const res = await fetch(`/api/files/list?path=${encodeURIComponent(path)}`);
-            const data = await res.json();
+            let data;
+            if (this._dirCache.has(path)) {
+                data = this._dirCache.get(path);
+            } else {
+                const res = await fetch(`/api/files/list?path=${encodeURIComponent(path)}`);
+                data = await res.json();
+                if (!data.error) {
+                    this._dirCache.set(path, data);
+                    if (this._dirCache.size > this._maxCacheSize) {
+                        const firstKey = this._dirCache.keys().next().value;
+                        this._dirCache.delete(firstKey);
+                    }
+                }
+            }
 
             if (data.error) {
                 console.error('[FileTree] 加载子目录失败:', data.error);
@@ -181,57 +178,39 @@ class FileTreeManager {
             }
 
             this.expandedDirs.add(path);
-
-            // 创建子容器
-            const childrenEl = Utils.createElement('div', {
-                className: 'tree-children pl-3',
-            });
-
+            const childrenEl = window.codex.utils.createElement('div', { className: 'tree-children pl-3' });
             data.forEach(entry => {
-                const childItem = this.createTreeItem(entry);
-                childrenEl.appendChild(childItem);
+                childrenEl.appendChild(this.createTreeItem(entry));
             });
-
-            // 插入到父元素后面
             itemEl.after(childrenEl);
         } catch (e) {
             console.error('[FileTree] 加载子目录失败:', e);
         }
     }
 
-    /**
-     * 选中文件：在终端中预览
-     */
     async selectFile(entry) {
-        // 更新选中状态
-        Utils.$$('.tree-item.selected').forEach(el => el.classList.remove('selected'));
-        const itemEl = Utils.$(`[data-path="${CSS.escape(entry.path)}"]`);
+        window.codex.utils.$$('.tree-item.selected').forEach(el => el.classList.remove('selected'));
+        const itemEl = window.codex.utils.$(`[data-path="${CSS.escape(entry.path)}"]`);
         if (itemEl) itemEl.classList.add('selected');
         this.selectedFile = entry.path;
 
-        // 读取文件内容并显示
         if (!entry.is_dir) {
             try {
                 const res = await fetch(`/api/files/read?path=${encodeURIComponent(entry.path)}`);
                 const data = await res.json();
-
                 if (data.error) {
                     console.error('[FileTree] 读取文件失败:', data.error);
                     return;
                 }
 
-                // 在终端中显示文件内容（可选：显示在终端中）
-                if (window.terminalManager && window.terminalManager.activeSessionId) {
-                    const session = window.terminalManager.sessions.get(
-                        window.terminalManager.activeSessionId
-                    );
+                const tm = window.codex.terminal;
+                if (tm && tm.activeSessionId) {
+                    const session = tm.sessions.get(tm.activeSessionId);
                     if (session) {
                         session.term.writeln('');
                         session.term.writeln(`\x1b[36m── ${entry.name} ──\x1b[0m`);
                         const lines = data.content.split('\n');
-                        lines.forEach(line => {
-                            session.term.writeln(line);
-                        });
+                        lines.forEach(line => session.term.writeln(line));
                         session.term.writeln('');
                     }
                 }
@@ -241,9 +220,6 @@ class FileTreeManager {
         }
     }
 
-    /**
-     * 处理搜索
-     */
     async handleSearch(keyword) {
         if (!keyword.trim()) {
             await this.loadDirectory(this.currentPath);
@@ -266,17 +242,13 @@ class FileTreeManager {
             }
 
             data.forEach(entry => {
-                const item = this.createTreeItem(entry);
-                this.treeEl.appendChild(item);
+                this.treeEl.appendChild(this.createTreeItem(entry));
             });
         } catch (e) {
             console.error('[FileTree] 搜索失败:', e);
         }
     }
 
-    /**
-     * 获取父级路径
-     */
     getParentPath(path) {
         const normalized = path.replace(/\\/g, '/');
         const lastSlash = normalized.lastIndexOf('/');
@@ -285,5 +257,5 @@ class FileTreeManager {
     }
 }
 
-// 全局实例
-window.fileTreeManager = new FileTreeManager();
+window.codex.filetree = new FileTreeManager();
+const fileTreeManager = window.codex.filetree;

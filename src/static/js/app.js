@@ -2,52 +2,44 @@
 // app.js — 主控制器
 // ═══════════════════════════════════════════
 
-(function () {
+window.codex = window.codex || {};
+
+(async function init() {
     'use strict';
 
-    /**
-     * 应用启动
-     */
-    async function init() {
-        console.log('[App] Codex Desktop 启动中...');
+    console.log('[App] Codex Desktop 启动中...');
 
-        // 1. 加载主题偏好
-        layoutManager.loadTheme();
+    const $ = window.codex.utils.$;
 
-        // 2. 初始化各模块
-        settingsManager.init();
-        layoutManager.init();
-        await fileTreeManager.init();
+    // 1. 加载主题偏好
+    window.codex.layout.loadTheme();
 
-        // 3. 建立 WebSocket 连接
-        // 连接成功后会自动创建终端会话
-        wsManager.connect();
+    // 2. 初始化各模块
+    window.codex.settings.init();
+    window.codex.layout.init();
+    await window.codex.filetree.init();
+    window.codex.terminal.init();
 
-        // 4. 终端管理器初始化（监听 ws 事件）
-        terminalManager.init();
+    // 3. 建立 WebSocket 连接
+    window.codex.ws.connect();
 
-        // 5. 检查后端健康状态
-        try {
-            const res = await fetch('/api/health');
-            const data = await res.json();
-            console.log('[App] 后端状态:', data);
-            Utils.$('#status-version').textContent = `Codex Desktop v${data.version}`;
-        } catch (e) {
-            console.error('[App] 后端连接失败:', e);
-            showError('无法连接到后端服务');
-        }
-
-        console.log('[App] 初始化完成');
+    // 4. 检查后端健康状态
+    try {
+        const res = await fetch('/api/health');
+        const data = await res.json();
+        console.log('[App] 后端状态:', data);
+        $('#status-version').textContent = `Codex Desktop v${data.version}`;
+    } catch (e) {
+        console.error('[App] 后端连接失败:', e);
+        showError('无法连接到后端服务');
     }
 
-    /**
-     * 显示全局错误提示
-     */
-    function showError(message) {
-        const container = Utils.$('#terminal-wrapper');
-        if (!container) return;
+    console.log('[App] 初始化完成');
 
-        const errorEl = Utils.createElement('div', {
+    function showError(message) {
+        const container = $('#terminal-wrapper');
+        if (!container) return;
+        const errorEl = window.codex.utils.createElement('div', {
             className: 'absolute inset-0 flex items-center justify-center',
             innerHTML: `
                 <div class="text-center text-gray-400">
@@ -61,12 +53,5 @@
             `,
         });
         container.appendChild(errorEl);
-    }
-
-    // DOM 就绪后启动
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
     }
 })();

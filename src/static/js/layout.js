@@ -2,10 +2,10 @@
 // layout.js — 布局管理模块
 // ═══════════════════════════════════════════
 
+window.codex = window.codex || {};
+
 class LayoutManager {
     constructor() {
-        this.sidebar = Utils.$('#sidebar');
-        this.resizer = Utils.$('#sidebar-resizer');
         this.isDragging = false;
         this.startX = 0;
         this.startWidth = 0;
@@ -13,10 +13,10 @@ class LayoutManager {
         this.maxWidth = 500;
     }
 
-    /**
-     * 初始化拖拽分栏
-     */
     init() {
+        const $ = window.codex.utils.$;
+        this.sidebar = $('#sidebar');
+        this.resizer = $('#sidebar-resizer');
         if (!this.resizer || !this.sidebar) return;
 
         this.resizer.addEventListener('mousedown', (e) => {
@@ -26,8 +26,7 @@ class LayoutManager {
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
 
-            // 添加遮罩防止 iframe 抢焦点
-            const overlay = Utils.createElement('div', {
+            const overlay = window.codex.utils.createElement('div', {
                 className: 'fixed inset-0 z-50',
                 id: 'drag-overlay',
             });
@@ -36,18 +35,12 @@ class LayoutManager {
 
         document.addEventListener('mousemove', (e) => {
             if (!this.isDragging) return;
-
             const delta = e.clientX - this.startX;
             let newWidth = this.startWidth + delta;
-
-            // 限制宽度范围
             newWidth = Math.max(this.minWidth, Math.min(this.maxWidth, newWidth));
-
             this.sidebar.style.width = `${newWidth}px`;
-
-            // 通知终端重新适配
-            if (window.terminalManager) {
-                window.terminalManager.fitActive();
+            if (window.codex.terminal) {
+                window.codex.terminal.fitActive();
             }
         });
 
@@ -56,57 +49,47 @@ class LayoutManager {
             this.isDragging = false;
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
-
-            const overlay = Utils.$('#drag-overlay');
+            const overlay = window.codex.utils.$('#drag-overlay');
             if (overlay) overlay.remove();
         });
 
-        // 主题切换
-        Utils.$('#btn-theme')?.addEventListener('click', () => this.toggleTheme());
+        $('#btn-theme')?.addEventListener('click', () => this.toggleTheme());
     }
 
-    /**
-     * 切换暗色/亮色主题
-     */
     toggleTheme() {
         const html = document.documentElement;
         const isDark = html.classList.contains('dark');
 
         if (isDark) {
             html.classList.remove('dark');
-            Utils.$('#icon-moon')?.classList.add('hidden');
-            Utils.$('#icon-sun')?.classList.remove('hidden');
+            window.codex.utils.$('#icon-moon')?.classList.add('hidden');
+            window.codex.utils.$('#icon-sun')?.classList.remove('hidden');
         } else {
             html.classList.add('dark');
-            Utils.$('#icon-moon')?.classList.remove('hidden');
-            Utils.$('#icon-sun')?.classList.add('hidden');
+            window.codex.utils.$('#icon-moon')?.classList.remove('hidden');
+            window.codex.utils.$('#icon-sun')?.classList.add('hidden');
         }
 
-        // 更新终端主题
-        if (window.terminalManager) {
-            window.terminalManager.sessions.forEach(session => {
-                session.term.options.theme = window.terminalManager.getTerminalTheme();
+        if (window.codex.terminal) {
+            window.codex.terminal.sessions.forEach(session => {
+                session.term.options.theme = window.codex.terminal.getTerminalTheme();
             });
         }
 
-        // 保存偏好
         localStorage.setItem('codex-theme', isDark ? 'light' : 'dark');
     }
 
-    /**
-     * 加载保存的主题偏好
-     */
     loadTheme() {
         const saved = localStorage.getItem('codex-theme');
         const html = document.documentElement;
 
         if (saved === 'light') {
             html.classList.remove('dark');
-            Utils.$('#icon-moon')?.classList.add('hidden');
-            Utils.$('#icon-sun')?.classList.remove('hidden');
+            window.codex.utils.$('#icon-moon')?.classList.add('hidden');
+            window.codex.utils.$('#icon-sun')?.classList.remove('hidden');
         }
     }
 }
 
-// 全局实例
-window.layoutManager = new LayoutManager();
+window.codex.layout = new LayoutManager();
+const layoutManager = window.codex.layout;

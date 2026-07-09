@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Codex Desktop</title>
 
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tailwind CSS (local) -->
+    <script src="/vendor/tailwind.min.js"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -22,12 +22,11 @@
         }
     </script>
 
-    <!-- xterm.js -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
-
+    <!-- xterm.js (local) -->
+    <link rel="stylesheet" href="/vendor/xterm.min.css">
+    <script src="/vendor/xterm.min.js"></script>
+    <script src="/vendor/addon-fit.min.js"></script>
+    <script src="/vendor/addon-web-links.min.js"></script>
     <link rel="stylesheet" href="/css/app.css">
 </head>
 <body class="bg-surface-900 text-gray-100 h-screen flex flex-col overflow-hidden">
