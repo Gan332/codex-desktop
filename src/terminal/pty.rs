@@ -1,4 +1,4 @@
-use portable_pty::{ChildKiller, CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
+use portable_pty::{Child, CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
@@ -10,7 +10,7 @@ pub struct PtySession {
     pub output_tx: broadcast::Sender<String>,
     master: Option<Box<dyn MasterPty + Send>>,
     _reader_handle: task::JoinHandle<()>,
-    child_killer: Option<Box<dyn ChildKiller + Send>>,
+    child: Option<Box<dyn Child>>,
 }
 
 impl PtySession {
@@ -51,7 +51,6 @@ impl PtySession {
             .master
             .take_writer()
             .map_err(|e| format!("PTY writer 获取失败: {}", e))?;
-        let killer = child.try_into_killer().ok();
         let master: Option<Box<dyn MasterPty + Send>> = Some(pair.master);
 
         let writer = Arc::new(Mutex::new(writer));
@@ -77,7 +76,7 @@ impl PtySession {
             output_tx,
             master,
             _reader_handle: reader_handle,
-            child_killer: killer,
+            child: Some(child),
         })
     }
 
@@ -105,8 +104,8 @@ impl PtySession {
 
     pub fn kill(&mut self) {
         self.master = None;
-        if let Some(killer) = self.child_killer.take() {
-            let _ = killer.kill();
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
         }
     }
 }

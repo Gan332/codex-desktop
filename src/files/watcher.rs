@@ -5,25 +5,24 @@
 
 #![allow(dead_code)]
 
-use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Event, RecursiveMode, Watcher};
 use std::path::Path;
 use tokio::sync::mpsc;
 
 pub struct FileWatcher {
-    _watcher: RecommendedWatcher,
+    _watcher: notify::RecommendedWatcher,
 }
 
 impl FileWatcher {
     pub fn new() -> (Self, mpsc::Receiver<Event>) {
         let (tx, rx) = mpsc::channel(64);
 
-        let watcher = RecommendedWatcher::new(
+        let watcher = notify::recommended_watcher(
             move |res: Result<Event, notify::Error>| {
                 if let Ok(event) = res {
                     let _ = tx.try_send(event);
                 }
             },
-            Config::default(),
         )
         .expect("Failed to create file watcher");
 
