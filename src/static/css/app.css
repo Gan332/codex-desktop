@@ -1,0 +1,137 @@
+/* ═══════════════════════════════════════════
+   Codex Desktop — 全局样式
+   ═══════════════════════════════════════════ */
+
+/* ── 亮色主题 ────────────────────────────── */
+html:not(.dark) body {
+    background: #f8fafc;
+    color: #1e293b;
+}
+html:not(.dark) #toolbar,
+html:not(.dark) #statusbar {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+}
+html:not(.dark) #sidebar,
+html:not(.dark) #settings-panel {
+    background: #f1f5f9;
+    border-color: #e2e8f0;
+}
+html:not(.dark) .cfg-input {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #1e293b;
+}
+html:not(.dark) #sidebar-resizer {
+    background: #e2e8f0;
+}
+
+/* ── 工具栏按钮 ──────────────────────────── */
+.tab-btn {
+    @apply p-1.5 rounded text-gray-400 hover:text-gray-100 hover:bg-gray-700 transition-colors;
+}
+html:not(.dark) .tab-btn {
+    @apply hover:bg-gray-200 text-gray-500 hover:text-gray-700;
+}
+
+/* ── 终端标签页 ──────────────────────────── */
+.terminal-tab {
+    @apply flex items-center gap-1.5 px-2.5 py-1 text-xs rounded cursor-pointer transition-colors;
+    @apply text-gray-400 hover:text-gray-200 hover:bg-gray-700;
+}
+.terminal-tab.active {
+    @apply bg-gray-700 text-white;
+}
+html:not(.dark) .terminal-tab {
+    @apply text-gray-500 hover:text-gray-700 hover:bg-gray-200;
+}
+html:not(.dark) .terminal-tab.active {
+    @apply bg-gray-200 text-gray-800;
+}
+
+.terminal-tab .tab-close {
+    @apply opacity-0 group-hover:opacity-100 ml-1 p-0.5 rounded hover:bg-gray-600 transition-opacity;
+}
+.terminal-tab:hover .tab-close {
+    @apply opacity-100;
+}
+
+/* ── 设置面板输入框 ──────────────────────── */
+.cfg-input {
+    @apply w-full bg-surface-900 text-sm text-gray-200 rounded px-2.5 py-2
+           border border-gray-600 focus:border-accent-500 focus:outline-none
+           placeholder-gray-500 transition-colors;
+}
+
+/* ── 文件树 ──────────────────────────────── */
+.tree-item {
+    @apply flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer
+           hover:bg-gray-700/50 transition-colors text-gray-300;
+}
+html:not(.dark) .tree-item {
+    @apply hover:bg-gray-200 text-gray-600;
+}
+.tree-item:hover {
+    @apply text-gray-100;
+}
+.tree-item.selected {
+    @apply bg-accent-500/20 text-accent-400;
+}
+
+.tree-icon {
+    @apply w-4 h-4 shrink-0 text-center;
+}
+
+/* 文件类型颜色 */
+.icon-js   { color: #facc15; }
+.icon-ts   { color: #3b82f6; }
+.icon-rs   { color: #f97316; }
+.icon-py   { color: #22c55e; }
+.icon-json { color: #a3a3a3; }
+.icon-md   { color: #93c5fd; }
+.icon-html { color: #f87171; }
+.icon-css  { color: #818cf8; }
+.icon-folder { color: #fbbf24; }
+.icon-folder-open { color: #f59e0b; }
+.icon-file { color: #6b7280; }
+
+/* ── xterm 覆盖样式 ──────────────────────── */
+#terminal-wrapper .xterm {
+    padding: 4px;
+}
+#terminal-wrapper .xterm-viewport {
+    overflow-y: auto !important;
+}
+
+/* ── 滚动条样式 ──────────────────────────── */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+}
+
+/* ── 动画 ────────────────────────────────── */
+@keyframes fade-in {
+    from { opacity: 0; transform: translateX(8px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+#settings-panel {
+    animation: fade-in 0.15s ease-out;
+}
+
+/* ── 加载提示 ────────────────────────────── */
+.loading-overlay {
+    @apply absolute inset-0 flex items-center justify-center bg-surface-900/80 z-10;
+}
+.spinner {
+    @apply w-6 h-6 border-2 border-gray-500 border-t-accent-500 rounded-full animate-spin;
+}

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codex Desktop</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        bg: { 50: '#f8fafc', 900: '#0f172a' },
+                        surface: { 50: '#f1f5f9', 800: '#1e293b', 900: '#0f172a' },
+                        accent: { 500: '#6366f1', 600: '#4f46e5' },
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- xterm.js -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
+
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="bg-surface-900 text-gray-100 h-screen flex flex-col overflow-hidden">
+
+    <!-- ═══ 顶部工具栏 ═══ -->
+    <header id="toolbar" class="flex items-center h-10 px-3 bg-surface-800 border-b border-gray-700 select-none shrink-0">
+        <!-- Logo -->
+        <div class="flex items-center gap-2 mr-4">
+            <div class="w-5 h-5 bg-accent-500 rounded flex items-center justify-center">
+                <span class="text-white text-xs font-bold">C</span>
+            </div>
+            <span class="text-sm font-semibold text-gray-200">Codex Desktop</span>
+        </div>
+
+        <!-- 终端标签页 -->
+        <div id="terminal-tabs" class="flex items-center gap-1 flex-1 overflow-x-auto">
+            <!-- 动态生成 -->
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="flex items-center gap-1 ml-2">
+            <button id="btn-new-tab" class="tab-btn" title="新建终端">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+            </button>
+            <button id="btn-settings" class="tab-btn" title="设置">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+            </button>
+            <button id="btn-theme" class="tab-btn" title="切换主题">
+                <svg id="icon-moon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                </svg>
+                <svg id="icon-sun" class="w-4 h-4 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- ═══ 主内容区 ═══ -->
+    <main id="main-content" class="flex flex-1 min-h-0">
+
+        <!-- ── 文件浏览器侧栏 ── -->
+        <aside id="sidebar" class="w-60 bg-surface-800 border-r border-gray-700 flex flex-col shrink-0 overflow-hidden">
+            <!-- 搜索框 -->
+            <div class="p-2 border-b border-gray-700">
+                <div class="relative">
+                    <input id="file-search" type="text" placeholder="搜索文件..."
+                        class="w-full bg-surface-900 text-sm text-gray-200 rounded px-2 py-1.5 pl-7 border border-gray-600 focus:border-accent-500 focus:outline-none placeholder-gray-500">
+                    <svg class="absolute left-2 top-1.5 w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                </div>
+            </div>
+            <!-- 当前路径 -->
+            <div class="px-2 py-1.5 text-xs text-gray-400 border-b border-gray-700 truncate" id="current-path">
+                --
+            </div>
+            <!-- 文件树 -->
+            <div id="file-tree" class="flex-1 overflow-y-auto p-1 text-sm">
+                <!-- 动态生成 -->
+            </div>
+        </aside>
+
+        <!-- ── 拖拽分隔条 ── -->
+        <div id="sidebar-resizer" class="w-1 bg-gray-700 hover:bg-accent-500 cursor-col-resize transition-colors shrink-0"></div>
+
+        <!-- ── 终端主区域 ── -->
+        <section id="terminal-area" class="flex-1 flex flex-col min-w-0 bg-surface-900">
+            <!-- 终端容器 -->
+            <div id="terminal-container" class="flex-1 relative">
+                <!-- xterm 容器 -->
+                <div id="terminal-wrapper" class="absolute inset-0 p-1"></div>
+            </div>
+        </section>
+
+        <!-- ── 设置面板（默认隐藏） ── -->
+        <aside id="settings-panel" class="w-80 bg-surface-800 border-l border-gray-700 flex-col shrink-0 overflow-y-auto hidden">
+            <div class="p-4">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-100">设置</h2>
+                    <button id="btn-close-settings" class="tab-btn">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- API Key -->
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-400 mb-1">OpenAI API Key</label>
+                    <input id="cfg-api-key" type="password" placeholder="sk-..."
+                        class="cfg-input">
+                </div>
+
+                <!-- 模型 -->
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-400 mb-1">默认模型</label>
+                    <select id="cfg-model" class="cfg-input">
+                        <option value="o4-mini">o4-mini</option>
+                        <option value="o3">o3</option>
+                        <option value="gpt-4o">GPT-4o</option>
+                        <option value="gpt-4o-mini">GPT-4o-mini</option>
+                    </select>
+                </div>
+
+                <!-- 工作目录 -->
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-400 mb-1">工作目录</label>
+                    <input id="cfg-work-dir" type="text" placeholder="C:\Users\..."
+                        class="cfg-input">
+                </div>
+
+                <!-- Shell -->
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-400 mb-1">Shell</label>
+                    <select id="cfg-shell" class="cfg-input">
+                        <option value="powershell">PowerShell</option>
+                        <option value="cmd">CMD</option>
+                        <option value="bash">Bash</option>
+                        <option value="zsh">Zsh</option>
+                    </select>
+                </div>
+
+                <!-- 端口 -->
+                <div class="mb-4">
+                    <label class="block text-xs text-gray-400 mb-1">服务端口</label>
+                    <input id="cfg-port" type="number" value="9527" min="1024" max="65535"
+                        class="cfg-input">
+                </div>
+
+                <!-- 保存按钮 -->
+                <button id="btn-save-config"
+                    class="w-full py-2 bg-accent-500 hover:bg-accent-600 text-white text-sm font-medium rounded transition-colors">
+                    保存设置
+                </button>
+
+                <p id="config-status" class="mt-2 text-xs text-center text-gray-500"></p>
+            </div>
+        </aside>
+    </main>
+
+    <!-- ═══ 底部状态栏 ═══ -->
+    <footer id="statusbar" class="flex items-center h-6 px-3 bg-surface-800 border-t border-gray-700 text-xs text-gray-400 shrink-0">
+        <span id="status-ws" class="flex items-center gap-1 mr-4">
+            <span class="w-2 h-2 rounded-full bg-red-500"></span>
+            未连接
+        </span>
+        <span id="status-cwd" class="mr-4 truncate">--</span>
+        <span id="status-pty" class="mr-4">--</span>
+        <span class="flex-1"></span>
+        <span id="status-version">Codex Desktop v0.1.0</span>
+    </footer>
+
+    <!-- JS 模块 -->
+    <script src="/js/utils.js"></script>
+    <script src="/js/websocket.js"></script>
+    <script src="/js/terminal.js"></script>
+    <script src="/js/filetree.js"></script>
+    <script src="/js/settings.js"></script>
+    <script src="/js/layout.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>
