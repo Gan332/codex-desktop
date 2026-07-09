@@ -14,7 +14,7 @@ pub struct PtySession {
 }
 
 impl PtySession {
-    pub fn spawn(shell: &str, work_dir: &str) -> Self {
+    pub fn spawn(shell: &str, work_dir: &str) -> Result<Self, String> {
         let pty_system = NativePtySystem::default();
         let pair = pty_system
             .openpty(PtySize {
@@ -23,7 +23,7 @@ impl PtySession {
                 pixel_width: 0,
                 pixel_height: 0,
             })
-            .unwrap();
+            .map_err(|e| format!("PTY 创建失败: {}", e))?;
 
         let mut cmd = if cfg!(target_os = "windows") {
             match shell {
@@ -39,9 +39,18 @@ impl PtySession {
 
         cmd.cwd(work_dir);
 
-        let child = pair.slave.spawn_command(cmd).unwrap();
-        let reader = pair.master.try_clone_reader().unwrap();
-        let writer = pair.master.take_writer().unwrap();
+        let child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| format!("PTY 子进程启动失败: {}", e))?;
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| format!("PTY reader 克隆失败: {}", e))?;
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|e| format!("PTY writer 获取失败: {}", e))?;
         let killer = child.try_into_killer().ok();
         let master: Option<Box<dyn MasterPty + Send>> = Some(pair.master);
 
@@ -63,13 +72,13 @@ impl PtySession {
             }
         });
 
-        Self {
+        Ok(Self {
             writer,
             output_tx,
             master,
             _reader_handle: reader_handle,
             child_killer: killer,
-        }
+        })
     }
 
     pub fn write(&self, data: &str) {

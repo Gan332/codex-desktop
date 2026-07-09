@@ -99,7 +99,7 @@ fn is_ignored_dir(name: &str) -> bool {
     )
 }
 
-/// 搜索文件——使用 walkdir，跳过常见忽略目录，结果上限 200 条
+/// 搜索文件——使用 walkdir，跳过常见忽略目录，结果上限 500 条
 pub fn search(base_path: &str, keyword: &str) -> Result<Vec<FileEntry>, String> {
     let base = Path::new(base_path);
     if !base.exists() {
@@ -107,11 +107,11 @@ pub fn search(base_path: &str, keyword: &str) -> Result<Vec<FileEntry>, String> 
     }
 
     let keyword_lower = keyword.to_lowercase();
-    let max_results = 200;
+    let max_results = 500;
     let mut results = Vec::new();
 
     for entry in walkdir::WalkDir::new(base)
-        .max_depth(8)
+        .max_depth(12)
         .filter_entry(|e| {
             // 跳过忽略目录及其子树
             if e.depth() > 0 && e.file_type().is_dir() {

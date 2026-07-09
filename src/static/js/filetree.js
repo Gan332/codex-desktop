@@ -49,7 +49,9 @@ class FileTreeManager {
     }
 
     async loadDirectory(path) {
-        this.treeEl.innerHTML = `<div class="p-2 text-xs text-gray-500">加载中...</div>`;
+        this.treeEl.innerHTML = `<div class="flex items-center gap-2 p-2 text-xs text-gray-500">
+            <span class="spinner"></span> 加载中...
+        </div>`;
 
         try {
             let data;

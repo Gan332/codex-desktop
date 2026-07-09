@@ -16,8 +16,14 @@ pub fn load() -> AppConfig {
     let path = config_path();
     if path.exists() {
         match fs::read_to_string(&path) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-            Err(_) => AppConfig::default(),
+            Ok(content) => serde_json::from_str(&content).unwrap_or_else(|e| {
+                eprintln!("[Config] 配置文件解析失败 ({}), 使用默认配置: {}", path.display(), e);
+                AppConfig::default()
+            }),
+            Err(e) => {
+                eprintln!("[Config] 配置文件读取失败 ({}): {}", path.display(), e);
+                AppConfig::default()
+            }
         }
     } else {
         let cfg = AppConfig::default();
@@ -26,13 +32,26 @@ pub fn load() -> AppConfig {
     }
 }
 
-/// 保存配置到文件
-pub fn save(cfg: &AppConfig) {
+/// 保存配置到文件，返回是否成功
+pub fn save(cfg: &AppConfig) -> bool {
     let path = config_path();
     if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
+        if let Err(e) = fs::create_dir_all(parent) {
+            eprintln!("[Config] 创建配置目录失败 ({}): {}", parent.display(), e);
+            return false;
+        }
     }
-    if let Ok(json) = serde_json::to_string_pretty(cfg) {
-        let _ = fs::write(path, json);
+    match serde_json::to_string_pretty(cfg) {
+        Ok(json) => match fs::write(&path, json) {
+            Ok(_) => true,
+            Err(e) => {
+                eprintln!("[Config] 配置文件写入失败 ({}): {}", path.display(), e);
+                false
+            }
+        },
+        Err(e) => {
+            eprintln!("[Config] 配置序列化失败: {}", e);
+            false
+        }
     }
 }

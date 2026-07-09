@@ -44,6 +44,12 @@ class SettingsManager {
 
     async save() {
         const $ = window.codex.utils.$;
+        const btn = $('#btn-save-config');
+        if (!btn || btn.disabled) return; // 防重复提交
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> 保存中...';
+
         const getVal = (id) => { const el = $(id); return el ? el.value : ''; };
 
         const update = {
@@ -68,6 +74,9 @@ class SettingsManager {
         } catch (e) {
             console.error('[Settings] 保存失败:', e);
             this.showStatus('保存失败', 'text-red-400');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '保存设置';
         }
     }
 

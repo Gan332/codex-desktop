@@ -135,3 +135,18 @@ html:not(.dark) .tree-item {
 .spinner {
     @apply w-6 h-6 border-2 border-gray-500 border-t-accent-500 rounded-full animate-spin;
 }
+html:not(.dark) .spinner {
+    @apply border-gray-300 border-t-accent-500;
+}
+
+/* 全局过渡动画 */
+.fade-in {
+    animation: fade-in 0.2s ease-out;
+}
+
+/* 保存按钮禁用样式 */
+.cfg-input:disabled,
+.tab-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

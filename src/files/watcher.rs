@@ -1,6 +1,7 @@
 // files/watcher.rs — 文件系统监控（预留接口）
 // 使用 notify crate 监控目录变更
 // 当前端连接 WebSocket 时可订阅文件变更事件
+// TODO: 集成到 WebSocket 会话中，向所有客户端广播文件变更
 
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::Path;

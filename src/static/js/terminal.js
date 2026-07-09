@@ -50,14 +50,36 @@ class TerminalManager {
             this.createSession();
         });
 
+        // ── 键盘快捷键 ──
+        document.addEventListener('keydown', (e) => {
+            // Ctrl+W: 关闭当前标签
+            if ((e.ctrlKey || e.metaKey) && e.key === 'w') {
+                e.preventDefault();
+                if (this.activeSessionId) {
+                    this.killSession(this.activeSessionId);
+                }
+            }
+            // Ctrl+Tab: 切换标签
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Tab') {
+                e.preventDefault();
+                const ids = [...this.sessions.keys()];
+                if (ids.length < 2) return;
+                const currentIdx = ids.indexOf(this.activeSessionId);
+                const nextIdx = e.shiftKey
+                    ? (currentIdx - 1 + ids.length) % ids.length
+                    : (currentIdx + 1) % ids.length;
+                this.switchTo(ids[nextIdx]);
+            }
+        });
+
         if (ws.isConnected) {
             this.createSession();
         }
     }
 
     createSession() {
-        const id = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-        window.codex.ws.send({ type: 'terminal_create', session_id: id });
+        // 服务器生成 session_id，前端只需发送创建指令
+        window.codex.ws.send({ type: 'terminal_create', session_id: '' });
     }
 
     setupTerminal(sessionId) {
@@ -116,9 +138,11 @@ class TerminalManager {
     createTab(sessionId) {
         const $ = window.codex.utils.$;
         const H = window.codex.utils.createElement;
+        const tabIndex = this.sessions.size + 1;
 
         const tab = H('div', {
             className: 'terminal-tab group flex items-center gap-1.5 px-2.5 py-1 text-xs rounded cursor-pointer',
+            'data-session-id': sessionId,
         });
 
         const icon = H('span', {
@@ -129,7 +153,7 @@ class TerminalManager {
         });
 
         const label = H('span', {
-            textContent: `终端 ${this.sessions.size + 1}`,
+            textContent: `终端 ${tabIndex}`,
         });
 
         const closeBtn = H('span', {

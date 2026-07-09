@@ -9,8 +9,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, RwLock};
-use tower_http::cors::CorsLayer;
+use tokio::sync::{broadcast, mpsc, CancellationToken, RwLock};
+use tower_http::cors::{Any, CorsLayer};
 
 use crate::config;
 use crate::files;
@@ -38,11 +38,20 @@ pub struct AppState {
     pub config: RwLock<config::AppConfig>,
 }
 
-pub fn build_router() -> Router {
+pub fn build_router(cfg: config::AppConfig) -> Router {
+    let port = cfg.port;
     let state = Arc::new(AppState {
         sessions: RwLock::new(terminal::SessionManager::new()),
-        config: RwLock::new(config::load()),
+        config: RwLock::new(cfg),
     });
+
+    let cors = CorsLayer::new()
+        .allow_origin(vec![
+            format!("http://localhost:{}", port).parse().unwrap(),
+            format!("http://127.0.0.1:{}", port).parse().unwrap(),
+        ])
+        .allow_methods(Any)
+        .allow_headers(Any);
 
     Router::new()
         .route("/", get(index_page))
@@ -57,7 +66,7 @@ pub fn build_router() -> Router {
         .route("/api/files/search", get(search_files))
         .route("/api/sessions", get(list_sessions))
         .route("/api/health", get(health_check))
-        .layer(CorsLayer::permissive())
+        .layer(cors)
         .with_state(state)
 }
 
@@ -114,6 +123,7 @@ async fn vendor_handler(
 enum WsSendMsg {
     Output { session_id: String, data: String },
     SessionCreated { session_id: String },
+    Error { session_id: String, data: String },
 }
 
 // ── WebSocket 终端 ────────────────────────────────────────────
@@ -142,6 +152,15 @@ async fn handle_terminal_ws(socket: WebSocket, state: Arc<AppState>) {
                 }
                 WsSendMsg::SessionCreated { session_id } => {
                     terminal::WsMessage::SessionCreated { session_id }
+                }
+                WsSendMsg::Error { session_id, data } => {
+                    terminal::WsMessage::Error {
+                        message: if session_id.is_empty() {
+                            data
+                        } else {
+                            format!("[{}] {}", session_id, data)
+                        },
+                    }
                 }
             };
             if sender
@@ -178,29 +197,41 @@ async fn handle_terminal_ws(socket: WebSocket, state: Arc<AppState>) {
         _ = send_task => recv_task.abort(),
         _ = recv_task => send_task.abort(),
     }
+
+    // ── WebSocket 断开后清理所有关联的 session ──
+    let mut mgr = state.sessions.write().await;
+    mgr.kill_all();
 }
 
 /// 将 broadcast::Receiver 的输出转发到内部 channel
+/// 支持 CancellationToken 用于外部取消
 async fn forward_output(
     session_id: String,
     mut rx: broadcast::Receiver<String>,
     tx: mpsc::UnboundedSender<WsSendMsg>,
+    cancel: CancellationToken,
 ) {
     loop {
-        match rx.recv().await {
-            Ok(data) => {
-                if tx
-                    .send(WsSendMsg::Output {
-                        session_id: session_id.clone(),
-                        data,
-                    })
-                    .is_err()
-                {
-                    break;
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => break,
+            result = rx.recv() => {
+                match result {
+                    Ok(data) => {
+                        if tx
+                            .send(WsSendMsg::Output {
+                                session_id: session_id.clone(),
+                                data,
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 }
             }
-            Err(broadcast::error::RecvError::Closed) => break,
-            Err(broadcast::error::RecvError::Lagged(_)) => continue,
         }
     }
 }
@@ -224,21 +255,35 @@ async fn handle_ws_message(
             let _ = sessions.resize(&session_id, cols, rows);
         }
         terminal::WsMessage::TerminalCreate { .. } => {
-            let sid = {
+            let (sid, cancel_token) = {
                 let cfg = state.config.read().await;
                 let mut mgr = state.sessions.write().await;
-                mgr.create_session(&cfg.shell, &cfg.work_dir)
+                match mgr.create_session(&cfg.shell, &cfg.work_dir) {
+                    Ok(sid) => {
+                        let token = mgr.get_cancel_token(&sid).unwrap_or_default();
+                        (Some(sid), token)
+                    }
+                    Err(e) => {
+                        let _ = shared_tx.send(WsSendMsg::Error {
+                            session_id: String::new(),
+                            data: e,
+                        });
+                        (None, CancellationToken::new())
+                    }
+                }
             };
-            // Notify frontend about the new session
-            let _ = shared_tx.send(WsSendMsg::SessionCreated {
-                session_id: sid.clone(),
-            });
-            // Start forwarding output
-            if let Some(rx) = state.sessions.read().await.get_output_rx(&sid) {
-                let tx = shared_tx.clone();
-                tokio::spawn(async move {
-                    forward_output(sid, rx, tx).await;
+            if let Some(sid) = sid {
+                // Notify frontend about the new session
+                let _ = shared_tx.send(WsSendMsg::SessionCreated {
+                    session_id: sid.clone(),
                 });
+                // Start forwarding output with cancellation support
+                if let Some(rx) = state.sessions.read().await.get_output_rx(&sid) {
+                    let tx = shared_tx.clone();
+                    tokio::spawn(async move {
+                        forward_output(sid, rx, tx, cancel_token).await;
+                    });
+                }
             }
         }
         terminal::WsMessage::TerminalKill { session_id } => {
@@ -302,8 +347,30 @@ async fn save_config(
     if let Some(v) = update.port {
         cfg.port = v;
     }
-    config::save(&cfg);
-    Json(cfg.clone())
+    let saved = config::save(&cfg);
+    let mut response = serde_json::json!(cfg.clone());
+    response["saved"] = serde_json::json!(saved);
+    Json(response)
+}
+
+/// 路径遍历防护：canonicalize 后校验路径必须在 base_dir 范围内，
+/// 防止通过绝对路径、`..` 或符号链接越权访问系统敏感文件。
+fn sanitize_path(path: &str, base_dir: &str) -> Result<String, String> {
+    use std::path::Path;
+
+    let base_canonical = Path::new(base_dir)
+        .canonicalize()
+        .map_err(|e| format!("工作目录无效: {}", e))?;
+
+    let canonical = Path::new(path)
+        .canonicalize()
+        .map_err(|e| format!("路径无效: {}", e))?;
+
+    if !canonical.starts_with(&base_canonical) {
+        return Err("路径越界：不允许访问工作目录以外的文件".into());
+    }
+
+    Ok(canonical.to_string_lossy().to_string())
 }
 
 #[derive(Deserialize)]
@@ -311,13 +378,16 @@ struct ListQuery {
     path: Option<String>,
 }
 
-async fn list_directory(Query(query): Query<ListQuery>) -> impl IntoResponse {
-    let path = query.path.unwrap_or_else(|| {
-        dirs::home_dir()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string()
-    });
+async fn list_directory(
+    Query(query): Query<ListQuery>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let work_dir = state.config.read().await.work_dir.clone();
+    let raw_path = query.path.unwrap_or_else(|| work_dir.clone());
+    let path = match sanitize_path(&raw_path, &work_dir) {
+        Ok(p) => p,
+        Err(e) => return Json(serde_json::json!({ "error": e })),
+    };
     match files::list_dir(&path) {
         Ok(entries) => Json(serde_json::to_value(entries).unwrap()),
         Err(e) => Json(serde_json::json!({ "error": e })),
@@ -329,8 +399,16 @@ struct ReadQuery {
     path: String,
 }
 
-async fn read_file(Query(query): Query<ReadQuery>) -> impl IntoResponse {
-    match files::read_file(&query.path) {
+async fn read_file(
+    Query(query): Query<ReadQuery>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let work_dir = state.config.read().await.work_dir.clone();
+    let path = match sanitize_path(&query.path, &work_dir) {
+        Ok(p) => p,
+        Err(e) => return Json(serde_json::json!({ "error": e })),
+    };
+    match files::read_file(&path) {
         Ok(content) => Json(serde_json::json!({ "content": content })),
         Err(e) => Json(serde_json::json!({ "error": e })),
     }
@@ -342,13 +420,16 @@ struct SearchQuery {
     keyword: String,
 }
 
-async fn search_files(Query(query): Query<SearchQuery>) -> impl IntoResponse {
-    let base = query.path.unwrap_or_else(|| {
-        dirs::home_dir()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string()
-    });
+async fn search_files(
+    Query(query): Query<SearchQuery>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let work_dir = state.config.read().await.work_dir.clone();
+    let raw_path = query.path.unwrap_or_else(|| work_dir.clone());
+    let base = match sanitize_path(&raw_path, &work_dir) {
+        Ok(p) => p,
+        Err(e) => return Json(serde_json::json!({ "error": e })),
+    };
     match files::search(&base, &query.keyword) {
         Ok(results) => Json(serde_json::to_value(results).unwrap()),
         Err(e) => Json(serde_json::json!({ "error": e })),

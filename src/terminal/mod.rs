@@ -2,24 +2,39 @@ pub mod pty;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, CancellationToken};
 
 pub struct SessionManager {
     sessions: HashMap<String, pty::PtySession>,
+    /// Map session_id → CancellationToken for forward tasks
+    cancel_tokens: HashMap<String, CancellationToken>,
 }
 
 impl SessionManager {
     pub fn new() -> Self {
         Self {
             sessions: HashMap::new(),
+            cancel_tokens: HashMap::new(),
         }
     }
 
-    pub fn create_session(&mut self, shell: &str, work_dir: &str) -> String {
+    pub fn create_session(&mut self, shell: &str, work_dir: &str) -> Result<String, String> {
         let id = uuid::Uuid::new_v4().to_string();
-        let session = pty::PtySession::spawn(shell, work_dir);
+        let session = pty::PtySession::spawn(shell, work_dir)?;
+        let token = CancellationToken::new();
+        self.cancel_tokens.insert(id.clone(), token);
         self.sessions.insert(id.clone(), session);
-        id
+        Ok(id)
+    }
+
+    /// Register a new cancellation token for a session (for re-spawned forward tasks).
+    pub fn set_cancel_token(&mut self, session_id: &str, token: CancellationToken) {
+        self.cancel_tokens.insert(session_id.to_string(), token);
+    }
+
+    /// Get the cancellation token for a session, if it exists.
+    pub fn get_cancel_token(&self, session_id: &str) -> Option<CancellationToken> {
+        self.cancel_tokens.get(session_id).cloned()
     }
 
     /// Subscribe to a session's output broadcast.
@@ -44,7 +59,22 @@ impl SessionManager {
     }
 
     pub fn kill_session(&mut self, session_id: &str) {
+        // Cancel the forward task first
+        if let Some(token) = self.cancel_tokens.remove(session_id) {
+            token.cancel();
+        }
         if let Some(mut session) = self.sessions.remove(session_id) {
+            session.kill();
+        }
+    }
+
+    /// Kill all sessions (used on WebSocket disconnect / graceful shutdown).
+    pub fn kill_all(&mut self) {
+        // Cancel all forward tasks
+        for (_id, token) in self.cancel_tokens.drain() {
+            token.cancel();
+        }
+        for (_id, mut session) in self.sessions.drain() {
             session.kill();
         }
     }
