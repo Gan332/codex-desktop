@@ -327,7 +327,7 @@ struct ConfigUpdate {
 async fn save_config(
     State(state): State<Arc<AppState>>,
     Json(update): Json<ConfigUpdate>,
-) -> Json<config::AppConfig> {
+) -> Json<serde_json::Value> {
     let mut cfg = state.config.write().await;
     if let Some(v) = update.api_key {
         cfg.api_key = v;

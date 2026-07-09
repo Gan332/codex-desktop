@@ -59,14 +59,14 @@ jobs:
       - name: Rename binary (Unix)
         if: runner.os != 'Windows'
         run: |
-          cp target/${{ matrix.target }}/release/${{ APP_NAME }} ${{ matrix.artifact }}
+          cp target/${{ matrix.target }}/release/${{ env.APP_NAME }} ${{ matrix.artifact }}
           chmod +x ${{ matrix.artifact }}
 
       - name: Rename binary (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Copy-Item "target/${{ matrix.target }}/release/${{ APP_NAME }}.exe" "${{ matrix.artifact }}"
+          Copy-Item "target/${{ matrix.target }}/release/${{ env.APP_NAME }}.exe" "${{ matrix.artifact }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

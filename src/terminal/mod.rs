@@ -27,11 +27,6 @@ impl SessionManager {
         Ok(id)
     }
 
-    /// Register a new cancellation token for a session (for re-spawned forward tasks).
-    pub fn set_cancel_token(&mut self, session_id: &str, token: CancellationToken) {
-        self.cancel_tokens.insert(session_id.to_string(), token);
-    }
-
     /// Get the cancellation token for a session, if it exists.
     pub fn get_cancel_token(&self, session_id: &str) -> Option<CancellationToken> {
         self.cancel_tokens.get(session_id).cloned()
