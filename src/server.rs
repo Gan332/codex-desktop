@@ -1,12 +1,11 @@
 use axum::{
-    Router,
     extract::{
-        State,
         ws::{Message, WebSocket, WebSocketUpgrade},
-        Query,
+        Query, State,
     },
-    response::{Html, Json, IntoResponse},
+    response::{Html, IntoResponse, Json},
     routing::{get, post},
+    Router,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -84,33 +83,31 @@ async fn js_handler(axum::extract::Path(path): axum::extract::Path<String>) -> i
         "websocket.js" => JS_WEBSOCKET,
         "layout.js" => JS_LAYOUT,
         "utils.js" => JS_UTILS,
-        _ => return (
-            [("content-type", "text/plain")],
-            "Not Found".to_string(),
-        ).into_response(),
+        _ => return ([("content-type", "text/plain")], "Not Found".to_string()).into_response(),
     };
     (
         [("content-type", "application/javascript; charset=utf-8")],
         content.to_string(),
-    ).into_response()
+    )
+        .into_response()
 }
 
-async fn vendor_handler(axum::extract::Path(path): axum::extract::Path<String>) -> impl IntoResponse {
+async fn vendor_handler(
+    axum::extract::Path(path): axum::extract::Path<String>,
+) -> impl IntoResponse {
     let (content, content_type): (&str, &str) = match path.as_str() {
         "xterm.min.css" => (VENDOR_XTERM_CSS, "text/css"),
         "xterm.min.js" => (VENDOR_XTERM_JS, "application/javascript"),
         "addon-fit.min.js" => (VENDOR_FIT_JS, "application/javascript"),
         "addon-web-links.min.js" => (VENDOR_WEBLINKS_JS, "application/javascript"),
         "tailwind.min.js" => (VENDOR_TAILWIND_JS, "application/javascript"),
-        _ => return (
-            [("content-type", "text/plain")],
-            "Not Found".to_string(),
-        ).into_response(),
+        _ => return ([("content-type", "text/plain")], "Not Found".to_string()).into_response(),
     };
     (
         [("content-type", format!("{}; charset=utf-8", content_type))],
         content.to_string(),
-    ).into_response()
+    )
+        .into_response()
 }
 
 // ── 内部消息：WS 发送任务从不同来源收消息 ────────────────────
@@ -214,10 +211,7 @@ async fn handle_ws_message(
     shared_tx: &mpsc::UnboundedSender<WsSendMsg>,
 ) {
     match msg {
-        terminal::WsMessage::TerminalInput {
-            session_id,
-            data,
-        } => {
+        terminal::WsMessage::TerminalInput { session_id, data } => {
             let sessions = state.sessions.read().await;
             sessions.write_input(&session_id, &data);
         }
@@ -227,7 +221,7 @@ async fn handle_ws_message(
             rows,
         } => {
             let sessions = state.sessions.read().await;
-            sessions.resize(&session_id, cols, rows);
+            let _ = sessions.resize(&session_id, cols, rows);
         }
         terminal::WsMessage::TerminalCreate { .. } => {
             let sid = {
@@ -290,12 +284,24 @@ async fn save_config(
     Json(update): Json<ConfigUpdate>,
 ) -> Json<config::AppConfig> {
     let mut cfg = state.config.write().await;
-    if let Some(v) = update.api_key { cfg.api_key = v; }
-    if let Some(v) = update.model { cfg.model = v; }
-    if let Some(v) = update.work_dir { cfg.work_dir = v; }
-    if let Some(v) = update.shell { cfg.shell = v; }
-    if let Some(v) = update.theme { cfg.theme = v; }
-    if let Some(v) = update.port { cfg.port = v; }
+    if let Some(v) = update.api_key {
+        cfg.api_key = v;
+    }
+    if let Some(v) = update.model {
+        cfg.model = v;
+    }
+    if let Some(v) = update.work_dir {
+        cfg.work_dir = v;
+    }
+    if let Some(v) = update.shell {
+        cfg.shell = v;
+    }
+    if let Some(v) = update.theme {
+        cfg.theme = v;
+    }
+    if let Some(v) = update.port {
+        cfg.port = v;
+    }
     config::save(&cfg);
     Json(cfg.clone())
 }

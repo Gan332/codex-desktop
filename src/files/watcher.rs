@@ -14,20 +14,17 @@ impl FileWatcher {
     pub fn new() -> (Self, mpsc::Receiver<Event>) {
         let (tx, rx) = mpsc::channel(64);
 
-        let mut watcher =
-            RecommendedWatcher::new(move |res: Result<Event, notify::Error>| {
+        let mut watcher = RecommendedWatcher::new(
+            move |res: Result<Event, notify::Error>| {
                 if let Ok(event) = res {
                     let _ = tx.try_send(event);
                 }
-            }, Config::default())
-            .unwrap();
-
-        (
-            Self {
-                _watcher: watcher,
             },
-            rx,
+            Config::default(),
         )
+        .unwrap();
+
+        (Self { _watcher: watcher }, rx)
     }
 
     pub fn watch(&mut self, path: &Path) -> Result<(), String> {
@@ -37,8 +34,6 @@ impl FileWatcher {
     }
 
     pub fn unwatch(&mut self, path: &Path) -> Result<(), String> {
-        self._watcher
-            .unwatch(path)
-            .map_err(|e| e.to_string())
+        self._watcher.unwatch(path).map_err(|e| e.to_string())
     }
 }

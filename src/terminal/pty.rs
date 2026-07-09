@@ -52,7 +52,7 @@ impl PtySession {
         let reader_handle = task::spawn_blocking(move || {
             let mut buf = [0u8; 8192];
             loop {
-                match (&reader as &dyn Read).read(&mut buf) {
+                match (&mut reader as &mut dyn Read).read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
                         let data = String::from_utf8_lossy(&buf[..n]).to_string();

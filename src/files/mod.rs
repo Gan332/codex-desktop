@@ -112,7 +112,6 @@ pub fn search(base_path: &str, keyword: &str) -> Result<Vec<FileEntry>, String> 
 
     for entry in walkdir::WalkDir::new(base)
         .max_depth(8)
-        .into_iter()
         .filter_entry(|e| {
             // 跳过忽略目录及其子树
             if e.depth() > 0 && e.file_type().is_dir() {
@@ -121,6 +120,7 @@ pub fn search(base_path: &str, keyword: &str) -> Result<Vec<FileEntry>, String> 
             }
             true
         })
+        .into_iter()
         .filter_map(|e| e.ok())
     {
         let name = entry.file_name().to_string_lossy().to_string();
